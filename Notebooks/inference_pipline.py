@@ -1,10 +1,9 @@
 from src.lightning_modules import LitModel
 import torch
-from src.datasources import S2_ALL_12BANDS
-from src.modules import BicubicUpscaledBaseline
 import rasterio
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
+import gc
 def load_model(checkpoint, device):
     """ Loads a model from a checkpoint.
 
@@ -41,30 +40,30 @@ def get_inference(x, device, model=None, checkpoint_path=None):
     y_hat = model(x)
     return y_hat
 
-def load_tif(path):
+def load_tif(path, device='cpu'):
     '''
     Load tiff from path into tensor
     '''
     with rasterio.open(path) as w:
         img = w.read()
-    return torch.tensor(img)
+    return torch.tensor(img).to(device)
 
-def load_multi_tif(paths):
+def load_multi_tif(paths, device='cpu'):
     revisits = []
     for path in paths:
         with rasterio.open(path) as w:
             revisits.append(w.read())
     revisits = np.array(revisits)
-    return torch.tensor(revisits)
+    return torch.tensor(revisits).to(device)
 
-def load_multi_tif_partial(paths, start_x, start_y, end_x, end_y):
+def load_multi_tif_partial(paths, start_x, start_y, end_x, end_y, device="cpu"):
     window = rasterio.windows.Window(start_x,start_y,end_x-start_x,end_y-start_y)
     revisits = []
     for path in paths:
         with rasterio.open(path) as w:
             revisits.append(w.read(window=window))
     revisits = np.array(revisits)
-    return torch.tensor(revisits)
+    return torch.tensor(revisits).to(device)
 
 def normalize(img):
     norm = img.clone()
@@ -74,13 +73,16 @@ def normalize(img):
     # Normalize along dims
     mean = norm.mean(dim=(0,2,3), keepdim=True)
     std = norm.std(dim=(0,2,3), keepdim=True)
-    norm = (norm - mean) / (std + 1e-8)
+    
+    b_mean = norm.mean(dim=(2,3), keepdim=True)
+    b_std = norm.std(dim=(2,3), keepdim=True)
+    norm = (norm - b_mean) / (b_std + 1e-8)
     
     norm = norm[:,:12]
     
     return norm, mean, std
 
-def chip_from_tensor(image=torch.Tensor, overlap=0, chip_size=26):
+def chip_from_tensor(image=torch.Tensor, overlap=0, chip_size=26, device="cpu"):
     ''' Split tensor into chips with associated indices
     
     Parameters <br>
@@ -115,7 +117,7 @@ def chip_from_tensor(image=torch.Tensor, overlap=0, chip_size=26):
     
     return chips, indices, (mu, std), img.shape
 
-def loader_from_chips(chips, indices, batch_size):
+def loader_from_chips(chips, indices, batch_size, device='cpu'):
     data = InferenceDataset(chips, indices)
     loader = DataLoader(data, batch_size, shuffle=False)
     return loader
@@ -162,20 +164,24 @@ def do_inference_from_path(revist_paths,
                                      partial[0],
                                      partial[1],
                                      partial[2],
-                                     partial[3])
+                                     partial[3],
+                                     device = device)
     else:
         if verbose: print("Getting full Tiff")
-        img = load_multi_tif(revist_paths)
+        img = load_multi_tif(revist_paths, device=device)
     
     if exclude8:
         if verbose: print("Excluding 8b")
         img = img[:,[0,1,2,3,4,5,6,7,9,10,11,12]]
     if verbose: print(f"Original shape: {img.shape}")
+    gc.collect()
     chips, indices, (mu, std), shape = chip_from_tensor(img,
                                                         overlap=overlap,
-                                                        chip_size=chip_size,)
+                                                        chip_size=chip_size,
+                                                        device=device)
     if verbose: print(f"Chip Shape: {chips[0].shape}\nChip Count: {len(chips)}")
     loader = loader_from_chips(chips, indices, batch_size)
+    gc.collect()
     model = load_model(model_checkpoint,device)
     predicted = infer_from_loader(loader, shape, overlap, model, std, mu, chip_size=chip_size)
     return predicted
