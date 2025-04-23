@@ -15,3 +15,5 @@ We are both responsible for researching additional super-resolution models and w
 
 ## Key Findings:  
 So far, we have found that the model performs reasonably well. Multiple iterations of the image acquisition and processing pipeline had to be created, with new requirements and refinements as we continued to test and understand the model. Further work is required to fix issues with spatial location, scaling, and overlap of the super-resolution output.  
+
+![Imgur](https://imgur.com/a/9fpm4ny.jpg)
