@@ -5,6 +5,8 @@ import rasterio
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import gc
+import subprocess
+import os
 def load_model(checkpoint, device):
     """ Loads a model from a checkpoint.
 
@@ -262,9 +264,32 @@ def full_inference_to_chips(revist_paths,
                 torch.cuda.empty_cache()
                 infer /= 10
                 
-                with rasterio.open(f"{chip_save_path}x{x}_y{y}.tif", 'w', **meta) as w:
+                temp_path = f"{chip_save_path}_x{x}_y{y}_temp.tif"
+                with rasterio.open(temp_path, 'w', **meta) as w:
                     w.write(infer.round().to(torch.int32).cpu().detach().numpy())
-                
+
+                final_path = f"{chip_save_path}x{x}_y{y}.tif"
+                try:
+                    subprocess.run([
+                        "rio", "cogeo", "create",
+                        temp_path, final_path,
+                        "--co", "BIGTIFF=IF_SAFER",
+                        "--allow-intermediate-compression",  # Reduces temp file size
+                        "--no-in-memory",  # Force disk-based processing
+                        "--threads", "2",  # Limit parallel threads
+                        "--overview-level", "5"
+                    ], check=True, capture_output=True, text=True)
+                except subprocess.CalledProcessError as e:
+                    print(f"Error creating COG for x={x}, y={y}:")
+                    print(f"Return code: {e.returncode}")
+                    print(f"Command: {e.cmd}")
+                    print(f"Stdout: {e.stdout}")
+                    print(f"Stderr: {e.stderr}")
+                    raise
+
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+
                 del infer
                 gc.collect()
                 torch.cuda.empty_cache()
