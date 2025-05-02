@@ -1,4 +1,5 @@
 from src.lightning_modules import LitModel
+from tqdm import tqdm
 import torch
 import rasterio
 import numpy as np
@@ -65,24 +66,35 @@ def load_multi_tif_partial(paths, start_x, start_y, end_x, end_y, device="cpu"):
     revisits = np.array(revisits)
     return torch.tensor(revisits).to(device)
 
-def normalize(img):
+def normalize(img, dist=None):
+    '''
+    img is the image to normalize <br>
+    dist is a tuple (mu,std), or none if using per-chip norm
+    '''
+    
+    
     norm = img.clone()
     # Set nan values to 0
     norm[img.isnan()] = 0
-    
-    # Normalize along dims
-    mean = norm.mean(dim=(0,2,3), keepdim=True)
-    std = norm.std(dim=(0,2,3), keepdim=True)
-    
-    b_mean = norm.mean(dim=(2,3), keepdim=True)
-    b_std = norm.std(dim=(2,3), keepdim=True)
-    norm = (norm - b_mean) / (b_std + 1e-8)
-    
     norm = norm[:,:12]
+
+    # Normalize along dims
+    if not norm:
+        mean = norm.mean(dim=(0,2,3), keepdim=True)
+        std = norm.std(dim=(0,2,3), keepdim=True)
+        
+        b_mean = norm.mean(dim=(2,3), keepdim=True)
+        b_std = norm.std(dim=(2,3), keepdim=True)
+        norm = (norm - b_mean) / (b_std + 1e-8)
+            
+    else:
+        norm = (norm - dist[0]) / (dist[1] + 1e-8)
+        mean = dist[0]
+        std = dist[1]
     
     return norm, mean, std
 
-def chip_from_tensor(image=torch.Tensor, overlap=0, chip_size=26, device="cpu"):
+def chip_from_tensor(image=torch.Tensor, overlap=0, chip_size=26, dist=None, device="cpu"):
     ''' Split tensor into chips with associated indices
     
     Parameters <br>
@@ -105,7 +117,7 @@ def chip_from_tensor(image=torch.Tensor, overlap=0, chip_size=26, device="cpu"):
                        width + gap * (width % gap != 0) - width%gap))
     img[:,:,:height,:width] = image[:,:,:,:]
     
-    img, mu, std = normalize(img)
+    img, mu, std = normalize(img, dist)
 
     indices = []
     chips = []
@@ -144,19 +156,20 @@ def infer_from_loader(loader, canvas_size, overlap, model, std, mu, chip_size=26
     canvas = torch.zeros(3, height, width)
     overlaps = torch.zeros(3, height, width)
     for i in range(len(preds)):
-        canvas[:,r[i]:r[i] + 156, c[i]:c[i]+156] += ((preds[i,0] * (std[:,:3] + 1e-8)) + mu[:,:3])[0]
+        canvas[:,r[i]:r[i] + 156, c[i]:c[i]+156] += ((preds[i,0] * (std[0,1:4] + 1e-8)) + mu[0,1:4])
         overlaps[:,r[i]:r[i] + 156, c[i]:c[i]+156] += 1
         
     return canvas / overlaps
 
 def do_inference_from_path(revist_paths,
-                           model_checkpoint,
+                           model,
                            batch_size=8,
                            chip_size=26,
                            overlap=0,
                            partial=[],
                            device="cpu",
                            verbose=True,
+                           dist=None,
                            exclude8=False):
     if len(partial) == 4:
         if verbose: print("Getting partial Tiff")
@@ -178,14 +191,91 @@ def do_inference_from_path(revist_paths,
     chips, indices, (mu, std), shape = chip_from_tensor(img,
                                                         overlap=overlap,
                                                         chip_size=chip_size,
+                                                        dist=dist,
                                                         device=device)
     if verbose: print(f"Chip Shape: {chips[0].shape}\nChip Count: {len(chips)}")
     loader = loader_from_chips(chips, indices, batch_size)
     gc.collect()
-    model = load_model(model_checkpoint,device)
     predicted = infer_from_loader(loader, shape, overlap, model, std, mu, chip_size=chip_size)
     return predicted
+
+def full_inference_to_chips(revist_paths,
+                           model_path,
+                           chip_save_path,
+                           batch_size=8,
+                           chip_size=26,
+                           overlap=0,
+                           device="cuda",
+                           chip_norm="global",
+                           verbose=True):
     
+    # Start by initializing global mean and std
+    with rasterio.open(revist_paths[0]) as r:
+        meta = r.profile
+    
+    mus = []
+    stds = []
+    for path in revist_paths:
+        tif = load_tif(path, device=device).to(torch.float32)
+        mus.append(tif.mean(dim=(1,2),keepdim=True))
+        stds.append(tif.std(dim=(1,2),keepdim=True))
+        del tif
+        gc.collect()
+        torch.cuda.empty_cache()
+    mu = torch.stack(mus)
+    std = torch.stack(std)
+    
+    width = meta["width"]
+    height = meta["height"]
+
+    meta["height"] = 1248
+    meta["width"] = 1248
+    meta["count"] = 3
+    transform = rasterio.Affine(meta["transform"][0] * (chip_size/156),
+                    meta["transform"][1],
+                    meta["transform"][2],
+                    meta["transform"][3],
+                    meta["transform"][4] * (chip_size/156),
+                    meta["transform"][5])
+    meta["transform"] = transform
+    
+    if chip_norm == "global":
+        dist = (mu,std)
+    else:
+        dist = None
+    
+    model = load_model(model_path, device=device)
+    model.eval()
+    with torch.no_grad(), torch.autocast(device_type="cuda"):
+        for x in tqdm(range(0,width-208,208)):
+            for y in tqdm(range(0,height-208,208)):
+                partial = [x,y,x+208,y+208]
+                infer = do_inference_from_path(revist_paths,
+                                                model,
+                                                batch_size=batch_size,
+                                                chip_size=chip_size,
+                                                overlap=overlap,
+                                                partial=partial,
+                                                dist=dist,
+                                                verbose=False)
+                gc.collect()
+                torch.cuda.empty_cache()
+                infer /= 10
+                
+                with rasterio.open(f"{chip_save_path}x{x}_y{y}.tif", 'w', **meta) as w:
+                    w.write(infer.round().to(torch.int32).cpu().detach().numpy())
+                
+                del infer
+                gc.collect()
+                torch.cuda.empty_cache()
+    
+    del model
+    gc.collect()
+    torch.cuda.empty_cache()
+    
+    return mu,std
+    
+
 class InferenceDataset(Dataset):
     def __init__(self, chips, indices):
         super().__init__()
@@ -198,3 +288,8 @@ class InferenceDataset(Dataset):
     
     def __len__(self):
         return len(self.chips)
+    
+    
+#### Stuff from SRC to avoid annoying imports ####
+# Code from worldstrat
+
