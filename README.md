@@ -8,7 +8,16 @@ Please refer to ![Description.ipynb](https://github.com/gaskil36/superresolution
 
 ## Visualization of Data and Results:  
 Please refer to the ![SuperResolutionVisualizations]() notebook for dynamic visualizations (as well as our ![presentation slides](https://docs.google.com/presentation/d/1NXxHIwHK3bESZhNmiMa6fwTGc-tXAnu_QI6w-GREb9Q/edit#slide=id.p). Below is a static visualization of our inputs and outputs.  
+___
 ![Selected Sites](Resources/SelectedSites.png)
-
-
-
+___
+### Input: Sentinel 2 (10 meter resolution)  
+![sentinel_full.png](Resources/sentinel_full.png)  
+___
+### Output 1: Super Resolution (1.5 meter resolution, Per-Band Normalization)  
+![per_band_full.png](Resources/per_band_full.png)
+#### A closer look:  
+![sentinel_zoom.png](Resources/sentinel_zoom.png)  
+![sentinel_zoom.png](Resources/per_band_zoom.png)
+___
+### Output 2: Super Resolution (1.5 meter resolution, Cross-Band Normalization)  
