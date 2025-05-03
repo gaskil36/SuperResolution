@@ -34,4 +34,4 @@ ___
 #### Super Resolution  
 ![cross_band_zoom.png](Resources/cross_band_zoom.png)  
 #### Planet  
-![site_1_planet.png](Resources/site_1_planet.png)  
+![site_1_planet.png](Resources/site1_planet.png)  
