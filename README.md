@@ -11,13 +11,27 @@ Please refer to the ![SuperResolutionVisualizations]() notebook for dynamic visu
 ___
 ![Selected Sites](Resources/SelectedSites.png)
 ___
-### Input: Sentinel 2 (10 meter resolution)  
+### Input 1: Sentinel 2 (10 meter resolution, Site 0)  
 ![sentinel_full.png](Resources/sentinel_full.png)  
 ___
-### Output 1: Super Resolution (1.5 meter resolution, Per-Band Normalization)  
+### Output 1: Super Resolution (1.5 meter resolution, Site 0, Per-Band Normalization)  
 ![per_band_full.png](Resources/per_band_full.png)
 #### A closer look:  
-![sentinel_zoom.png](Resources/sentinel_zoom.png)  
-![sentinel_zoom.png](Resources/per_band_zoom.png)
-___
-### Output 2: Super Resolution (1.5 meter resolution, Cross-Band Normalization)  
+#### Sentinel 2  
+![per_band_sentinel.png](Resources/per_band_sentinel.png)  
+#### Super Resolution  
+![sentinel_zoom.png](Resources/per_band_zoom.png)  
+#### Planet  
+![site_0_planet.png](Resources/site_0_planet.png)  
+___  
+### Input 2: Super Resolution (1.5 meter resolution, Site 1, Cross-Band Normalization)
+![site1_sentinel_full.png](Resources/site1_sentinel_full.png)
+### Output 2: Super Resolution (1.5 meter resolution, Site 1, Cross-Band Normalization)  
+![cross_band_full.png](Resources/cross_band_full.png)  
+### A closer look:  
+#### Sentinel 2  
+![cross_band_sentinel.png](Resources/cross_band_sentinel.png)  
+#### Super Resolution  
+![cross_band_zoom.png](Resources/cross_band_zoom.png)  
+#### Planet  
+![site_1_planet.png](Resources/site_1_planet.png)  
