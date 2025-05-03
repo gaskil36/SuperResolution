@@ -20,7 +20,7 @@ ___
 #### Sentinel 2  
 ![per_band_sentinel.png](Resources/per_band_sentinel.png)  
 #### Super Resolution  
-![per_band_zoom.png](Resources/per_band_zoom.png)  
+![per_band_zoom_in1.png](Resources/per_band_zoom_in1.png)  
 #### Planet  
 ![site_0_planet.png](Resources/site_0_planet.png)  
 ___  
