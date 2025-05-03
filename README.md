@@ -24,7 +24,7 @@ ___
 #### Planet  
 ![site_0_planet.png](Resources/site_0_planet.png)  
 ___  
-### Input 2: Super Resolution (1.5 meter resolution, Site 1, Cross-Band Normalization)
+### Input 2: Sentinel 2 (1.5 meter resolution, Site 1, Cross-Band Normalization)
 ![site1_sentinel_full.png](Resources/site1_sentinel_full.png)
 ### Output 2: Super Resolution (1.5 meter resolution, Site 1, Cross-Band Normalization)  
 ![cross_band_full.png](Resources/cross_band_full.png)  
