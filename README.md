@@ -20,7 +20,7 @@ ___
 #### Sentinel 2  
 ![per_band_sentinel.png](Resources/per_band_sentinel.png)  
 #### Super Resolution  
-![sentinel_zoom.png](Resources/per_band_zoom.png)  
+![per_band_zoom.png](Resources/per_band_zoom.png)  
 #### Planet  
 ![site_0_planet.png](Resources/site_0_planet.png)  
 ___  
@@ -30,7 +30,7 @@ ___
 ![cross_band_full.png](Resources/cross_band_full.png)  
 ### A closer look:  
 #### Sentinel 2  
-![cross_band_sentinel.png](Resources/cross_band_sentinel.png)  
+![site1_sentinel_zoomed.png](Resources/site1_sentinel_zoomed.png)  
 #### Super Resolution  
 ![cross_band_zoom.png](Resources/cross_band_zoom.png)  
 #### Planet  
