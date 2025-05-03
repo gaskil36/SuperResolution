@@ -1,4 +1,6 @@
-from src.lightning_modules import LitModel
+# Written by Alexander Vu and Ben Gaskill using code from worldstrat
+# Import path assumes being run in a google drive
+from drive.MyDrive.SuperResolution12RV2.src.lightning_modules import LitModel
 from tqdm import tqdm
 import torch
 import rasterio
@@ -52,6 +54,10 @@ def load_tif(path, device='cpu'):
     return torch.tensor(img).to(device)
 
 def load_multi_tif(paths, device='cpu'):
+    '''
+    Load several tifs from paths into tensor <br>
+    Input a list of paths.
+    '''
     revisits = []
     for path in paths:
         with rasterio.open(path) as w:
@@ -60,6 +66,12 @@ def load_multi_tif(paths, device='cpu'):
     return torch.tensor(revisits).to(device)
 
 def load_multi_tif_partial(paths, start_x, start_y, end_x, end_y, device="cpu"):
+    '''
+    Load in parts of several tifs <br>
+    Paths: List of paths to images
+    start_z: Coordinates of where to start drawing bounding box <br>
+    end_Z: Coorinates of where to end drawing bounding box.
+    '''
     window = rasterio.windows.Window(start_x,start_y,end_x-start_x,end_y-start_y)
     revisits = []
     for path in paths:
@@ -81,7 +93,7 @@ def normalize(img, dist=None):
     norm = norm[:,:12]
 
     # Normalize along dims
-    if not norm:
+    if not dist:
         mean = norm.mean(dim=(0,2,3), keepdim=True)
         std = norm.std(dim=(0,2,3), keepdim=True)
         
@@ -132,15 +144,26 @@ def chip_from_tensor(image=torch.Tensor, overlap=0, chip_size=26, dist=None, dev
     return chips, indices, (mu, std), img.shape
 
 def loader_from_chips(chips, indices, batch_size, device='cpu'):
+    '''
+    Takes chips and indices and creates a dataloader using them
+    '''
     data = InferenceDataset(chips, indices)
     loader = DataLoader(data, batch_size, shuffle=False)
     return loader
 
 def infer_from_loader(loader, canvas_size, overlap, model, std, mu, chip_size=26):
-    ###
+    '''
+    Uses a loader and model in order to perform inference <br>
+    loader: Dataloader containing images to superresolve <br>
+    canvas_size: Shape of the input, typically 208x208 <br>
+    overlap: Number of pixels on original image that chips are overlapped by <br>
+    model: worldstrat pretrained model <br>
+    std: Multiplier to output, used to return image to original domain <br>
+    mu: Additive to output, used to return image to original domain <br>
+    chip_size: Size of input chips
+    '''
     height = (canvas_size[2] // chip_size) * 156
     width = (canvas_size[3] // chip_size) * 156
-    channels = canvas_size[1]
     gap = chip_size - overlap
     
     preds = []
@@ -173,6 +196,22 @@ def do_inference_from_path(revist_paths,
                            verbose=True,
                            dist=None,
                            exclude8=False):
+    '''
+    Function that performs inference across a space from start to finish <br>
+    revisit_paths: List of files of sentinel-2 imagery <br>
+    batch_size: Number of chips to process at once <br>
+    chip_size: Width/Height of chips (must be square) <br>
+    overlap: Amount of pixels in original image to overlap chips by <br>
+    partial: Section of the images to perform inference on, usually a 208x208 space
+    described as [start_x, start_y, end_x, end_y] <br>
+    device: Device to perform computations on. Use cuda <br>
+    verbose: How much printing to do. <br>
+    dist: If this is a small part of a larger image,
+    input mu and std to give model information on the mu and std across whole image.
+    (mu, std) <br>
+    exclude8: Set to true if you have 13 bands instead of 12, where one is a second
+    band 8.
+    '''
     if len(partial) == 4:
         if verbose: print("Getting partial Tiff")
         img = load_multi_tif_partial(revist_paths,
@@ -210,7 +249,18 @@ def full_inference_to_chips(revist_paths,
                            device="cuda",
                            chip_norm="global",
                            verbose=True):
-    
+    '''
+    Function that performs inference across a space from start to finish <br>
+    revisit_paths: List of files of sentinel-2 imagery <br>
+    model_path: Path to pre-trained model <br>
+    chip_save_path: Path to save chips to <br>
+    batch_size: Number of chips to process at once <br>
+    chip_size: Width/Height of chips (must be square) <br>
+    overlap: Amount of pixels in original image to overlap chips by <br>
+    device: Device to perform computations on. Use cuda <br>
+    verbose: How much printing to do. <br>
+    chip_norm: global if normalizing across image, local if normalizing per chip <br>
+    '''
     # Start by initializing global mean and std
     with rasterio.open(revist_paths[0]) as r:
         meta = r.profile
@@ -225,7 +275,7 @@ def full_inference_to_chips(revist_paths,
         gc.collect()
         torch.cuda.empty_cache()
     mu = torch.stack(mus)
-    std = torch.stack(std)
+    std = torch.stack(stds)
     
     width = meta["width"]
     height = meta["height"]
@@ -251,48 +301,52 @@ def full_inference_to_chips(revist_paths,
     with torch.no_grad(), torch.autocast(device_type="cuda"):
         for x in tqdm(range(0,width-208,208)):
             for y in tqdm(range(0,height-208,208)):
-                partial = [x,y,x+208,y+208]
-                infer = do_inference_from_path(revist_paths,
-                                                model,
-                                                batch_size=batch_size,
-                                                chip_size=chip_size,
-                                                overlap=overlap,
-                                                partial=partial,
-                                                dist=dist,
-                                                verbose=False)
-                gc.collect()
-                torch.cuda.empty_cache()
-                infer /= 10
-                
-                temp_path = f"{chip_save_path}_x{x}_y{y}_temp.tif"
-                with rasterio.open(temp_path, 'w', **meta) as w:
-                    w.write(infer.round().to(torch.int32).cpu().detach().numpy())
-
                 final_path = f"{chip_save_path}x{x}_y{y}.tif"
-                try:
-                    subprocess.run([
-                        "rio", "cogeo", "create",
-                        temp_path, final_path,
-                        "--co", "BIGTIFF=IF_SAFER",
-                        "--allow-intermediate-compression",  # Reduces temp file size
-                        "--no-in-memory",  # Force disk-based processing
-                        "--threads", "2",  # Limit parallel threads
-                        "--overview-level", "5"
-                    ], check=True, capture_output=True, text=True)
-                except subprocess.CalledProcessError as e:
-                    print(f"Error creating COG for x={x}, y={y}:")
-                    print(f"Return code: {e.returncode}")
-                    print(f"Command: {e.cmd}")
-                    print(f"Stdout: {e.stdout}")
-                    print(f"Stderr: {e.stderr}")
-                    raise
+                partial = [x,y,x+208,y+208]
+                if not os.path.exists(final_path):
+                    infer = do_inference_from_path(revist_paths,
+                                                    model,
+                                                    batch_size=batch_size,
+                                                    chip_size=chip_size,
+                                                    overlap=overlap,
+                                                    partial=partial,
+                                                    dist=dist,
+                                                    verbose=verbose)
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    infer /= 10
+                    
+                    # Cloud-Optimized Geotiff conversion written by Ben Gaskill
+                    
+                    temp_path = f"{chip_save_path}_x{x}_y{y}_temp.tif"
+                    with rasterio.open(temp_path, 'w', **meta) as w:
+                        w.write(infer.round().to(torch.int32).cpu().detach().numpy())
 
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
+                    
+                    try:
+                        subprocess.run([
+                            "rio", "cogeo", "create",
+                            temp_path, final_path,
+                            "--co", "BIGTIFF=IF_SAFER",
+                            "--allow-intermediate-compression",  # Reduces temp file size
+                            "--no-in-memory",  # Force disk-based processing
+                            "--threads", "2",  # Limit parallel threads
+                            "--overview-level", "5"
+                        ], check=True, capture_output=True, text=True)
+                    except subprocess.CalledProcessError as e:
+                        print(f"Error creating COG for x={x}, y={y}:")
+                        print(f"Return code: {e.returncode}")
+                        print(f"Command: {e.cmd}")
+                        print(f"Stdout: {e.stdout}")
+                        print(f"Stderr: {e.stderr}")
+                        raise
 
-                del infer
-                gc.collect()
-                torch.cuda.empty_cache()
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+
+                    del infer
+                    gc.collect()
+                    torch.cuda.empty_cache()
     
     del model
     gc.collect()
@@ -313,8 +367,3 @@ class InferenceDataset(Dataset):
     
     def __len__(self):
         return len(self.chips)
-    
-    
-#### Stuff from SRC to avoid annoying imports ####
-# Code from worldstrat
-
